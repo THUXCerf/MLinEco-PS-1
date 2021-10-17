@@ -1,0 +1,173 @@
+---
+title: "Machine Learning PS I"
+output:
+  html_notebook:
+    fig_width: 10
+    fig_height: 10
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+### Programing Question
+#### YU Xinghao 221022026
+
+##### (a)
+For these variables, each of them may have different impact on the home value.
+
+**_crim_** Higher crime rate means more chaotic community, only few people may be interested, so it worth less. Negative effect.
+
+**_zn_** Houses with larger land zone have higher home value. Positive effect.
+
+**_indus_** Some industries that may cause pollution would decrease the home value, while some high-tech industries would increase the value of neighbourhoods. Unknown effect.
+
+**_chas_** Houses close to the Charles river have beautiful scene, hence gain higher values. Positive effect.
+
+**_nox_** Obviously, blocks with more air pollution tend to be less attractive, cheaper. Negative effect.
+
+**_rm_** Obviously, houses with more bedrooms must sell for a higher price. Positive effect.
+
+**_age_** Maybe some old buildings have historical meanings, some not, it's hard to determine. Unknown effect.
+
+**_dis_** If it's far away from the employment centres, many people would dislike it due to the long on-way time. Negative effect.
+
+**_rad_** If it's more accessible to highways, it's more convenient to parks, communities and centres around. Positive effect.
+
+**_tax_** Maybe high property-tax means high housing price. Positive effect.
+
+**_ptratio_** Towns with more teachers and fewer students, kids would get more educational resources. Negative effect.
+
+**_black_** It's hard to determine whether blacks would influence the home price. Unknown effect.
+
+**_lstat_** Obviously, blocks with high socioeconomic people would have high house price. Negative effect.
+
+#### (b)
+
+```{r}
+library(lmtest)
+library(sandwich)
+data("Boston", package = "MASS")
+```
+In general, it's better to put all of the control variables into consideration. Plot medv against all other variables.
+```{r}
+pairs(Boston, panel = panel.smooth, lower.panel=NULL, main="Boston Data")
+```
+From the last column of this graph, it's seems that home values against **_lstat_** and **_crim_** are more likely linear, while seems to be nonlinear in other variables.
+
+#### (c)
+
+```{r}
+fit1 <- lm(medv ~ ., Boston)
+summary(fit1)
+```
+First set all the variables, and most of the estimates are statistically significant and similar to the expectation. Also it's obviously that **_indus_** and **_age_** are not statistically insignificant, hence we could do the regression again without **_indus_** and **_age_**, then we could have the plot.
+
+```{r}
+Boston_Adj <- subset(Boston, select = c(-age,-indus))
+#rm(Boston)
+fit2 <- lm(medv ~ ., Boston_Adj)
+summary(fit2)
+```
+
+```{r}
+mean <- c(1)
+for(i in 1:10){
+  mean <- c(mean, mean(Boston_Adj[,i]))
+}
+
+coff2 <- fit2$coefficients[1:11]
+plot(medv ~ lstat, Boston_Adj)
+lines(as.double(crossprod(coff2, mean)) + fit2$coefficients[12] * lstat ~ lstat, col = "red", Boston_Adj)
+```
+
+#### (d)
+First we could using plot to discover whether there exists heteroskedasticity. And clearly, when **_lstat_** is pretty small or fairly large, there are several very high fitted residuals, it could be preliminary concluded that heteroskedasticity exists. 
+```{r}
+fit2_res <- fit2$residuals
+plot(fit2_res ~ lstat, Boston_Adj, ylab = "Fitted Residuals")
+```
+
+To judge more carefully, bptest chould be operated. And the _p-value_ is less than 0.01, reject the null hypothesis, heteroskedasticity exists.
+```{r}
+bptest(fit2)
+```
+
+Re-compute the standard errors and t-statistics with HC standard error.
+```{r}
+coeftest(fit2, vcov. = vcovHC(fit2, method = "white1"))
+```
+
+#### (e)
+Add the interaction term on basis of set of all variables (**_indus_** and **_age_** included). 
+```{r}
+fit3 <- lm(medv ~ . + lstat * age, Boston)
+summary(fit3)
+```
+Obviously this interaction term is not statistically significant, hence the result has not been changed so far.
+
+#### (f)
+Add the second order term of **_lstat_** on basis of set of adjusted variables (**_indus_** and **_age_** excluded).
+```{r}
+fit4 <- lm(medv ~ . + I(lstat^2), Boston_Adj)
+summary(fit4)
+
+coff4 <- fit4$coefficients[1:11]
+plot(medv ~ lstat, Boston_Adj)
+points(as.double(crossprod(coff4, mean)) + fit4$coefficients[12] * lstat + fit4$coefficients[13] * lstat^2 ~ lstat, col = "red", Boston_Adj)
+```
+
+#### (g)
+Add higher order terms of **_lstat_** on basis of set of adjusted variables (**_indus_** and **_age_** excluded).
+```{r}
+fit5 <- lm(medv ~ . + poly(lstat, 4, raw = TRUE), Boston_Adj)
+summary(fit5)
+
+coff5 <- fit5$coefficients[1:11]
+plot(medv ~ lstat, Boston_Adj)
+points(as.double(crossprod(coff5, mean)) + fit5$coefficients[12] * lstat + fit5$coefficients[14] * lstat^2
+       + fit5$coefficients[15] * lstat^3 + fit5$coefficients[16] * lstat^4 ~ lstat, col = "blue", Boston_Adj)
+```
+
+#### (h)
+To choose the best fitted model, perform BIC measurements (AIC at log(n) degree). And we know that the smaller BIC a model get, the better fitting ability a model has. Therefore the regression with higher order terms (fit 5) is the best, as it obtain the smallest BIC.  
+```{r}
+medv.n <- nrow(Boston_Adj)
+
+AIC(fit2, fit4, fit5, k = log(medv.n))
+```
+
+#### (i)
+For the best model (fit 5), using bootstrap method (B = 10000) to determine the regression uncertainty.
+```{r}
+B <- 10000
+k <- length(coef(fit5))
+
+BC <- matrix(nrow = B, ncol = k, dimnames = list(paste("Sample",1:B),names(coef(fit5))))
+
+set.seed(114514)
+for (i in 1:B) {
+  boot.data <- Boston_Adj[sample(x = 1:medv.n, size = medv.n, replace = TRUE), ]
+  bootfit <- lm(medv ~ . + poly(lstat, 4, raw = TRUE), boot.data)
+  BC[i, ] <- coef(bootfit)
+}
+head(BC)
+```
+
+Remove the repeat **_lstat_** column and check the mean values and variance of the coefficients.
+```{r}
+BC <- BC[ , -13]
+colMeans(BC, na.rm = T)
+apply(BC, 2, var)
+```
+
+For each coefficients, draw the density histgram.
+```{r}
+par(mfrow=c(2,3))
+for (c in 2:ncol(BC)) {
+  xx <- seq(min(BC[ , c]), max(BC[ , c]), length=100)
+  par(mai = c(.8, .8, .2, .2))
+  hist(BC[ , c], breaks = xx, main = "histgram of coefficients", xlab = colnames(BC)[c], 
+     col = 8, border = "grey90", freq = FALSE)
+  lines(xx, dnorm(xx, mean(BC[ , c]), sd(BC[ , c])), col = "royalblue", lwd = 1.5)
+}
+```
